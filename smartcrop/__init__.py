@@ -59,6 +59,76 @@ def center_from_good_features(matrix):
         'count': weight
     }
 
+def best_crop(center, original_width, original_height, target_aspect_ratio, retain_center=True):
+    center_x, center_y = center['x'], center['y']
+
+    image_aspect_ratio = original_width / original_height
+
+    if retain_center:
+        # Initial max width and height based on the center point to the image edges
+        max_width_left = center_x
+        max_width_right = original_width - center_x
+        max_height_top = center_y
+        max_height_bottom = original_height - center_y
+
+        # Calculate maximum possible height and width for the desired aspect ratio
+        if max_width_left < max_width_right:
+            max_width = max_width_left * 2
+        else:
+            max_width = max_width_right * 2
+
+        if max_height_top < max_height_bottom:
+            max_height = max_height_top * 2
+        else:
+            max_height = max_height_bottom * 2
+
+        if (max_width / max_height) > target_aspect_ratio:
+            # Width is too large; scale it down
+            crop_height = max_height
+            crop_width = crop_height * target_aspect_ratio
+        else:
+            # Height is too large; scale it down
+            crop_width = max_width
+            crop_height = crop_width / target_aspect_ratio
+
+        # Calculate top, bottom, left, right coordinates
+        left = max(center_x - crop_width / 2, 0)
+        right = min(center_x + crop_width / 2, original_width)
+        top = max(center_y - crop_height / 2, 0)
+        bottom = min(center_y + crop_height / 2, original_height)
+
+    else:
+        # Case: retain_center = False
+        if image_aspect_ratio > target_aspect_ratio:
+            # Width will be reduced to match the aspect ratio
+            crop_height = original_height
+            crop_width = crop_height * target_aspect_ratio
+
+            # Slide crop horizontally to ensure it fits and center_x is inside
+            left = max(min(center_x - crop_width / 2, original_width - crop_width), 0)
+            right = left + crop_width
+
+            top = 0
+            bottom = original_height
+        else:
+            # Height will be reduced to match the aspect ratio
+            crop_width = original_width
+            crop_height = crop_width / target_aspect_ratio
+
+            # Slide crop vertically to ensure it fits and center_y is inside
+            top = max(min(center_y - crop_height / 2, original_height - crop_height), 0)
+            bottom = top + crop_height
+
+            left = 0
+            right = original_width
+
+    # Ensure the crop box maintains the aspect ratio
+    return {
+        'left': int(left),
+        'right': int(right),
+        'top': int(top),
+        'bottom': int(bottom)
+    }
 
 def exact_crop(center, original_width, original_height, target_width, target_height):
     top = max(center['y'] - math.floor(target_height / 2), 0)
@@ -100,7 +170,7 @@ def auto_resize(image, target_width, target_height):
         w, h = w * ratio, h * ratio
         p = 2
 
-    image = cv2.resize(image, (int(w), int(h)))
+    image = cv2.resize(image, (int(w), int(h)), interpolation=cv2.INTER_CUBIC)
     print("Image resized by", w - width, "*", h - height, "in", p, "pass(es)")
 
     return image
@@ -126,6 +196,26 @@ def auto_center(matrix):
         print('Feat center', features_center)
 
     return center
+
+def smart_aspect_crop(image, aspect_ratio, destination):
+    #create the largest possible image with the required aspect ratio
+    original = cv2.imread(image)
+    matrix = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+    height, width, _ = original.shape
+    # center = center_from_faces(matrix)
+    #
+    # if not center:
+    #     print('Using Good Feature Tracking method')
+    #     center = center_from_good_features(matrix)
+    center = auto_center(matrix)
+
+    print('Found center at', center)
+    # now determine best possible size for the crop rectangle
+    crop_pos = best_crop(center, width, height, aspect_ratio, retain_center=False)
+    print('Crop rectangle is now', crop_pos)
+
+    cropped = original[int(crop_pos['top']): int(crop_pos['bottom']), int(crop_pos['left']): int(crop_pos['right'])]
+    cv2.imwrite(destination, cropped)
 
 
 def smart_crop(image, target_width, target_height, destination, do_resize):
